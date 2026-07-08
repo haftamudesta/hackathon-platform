@@ -4,10 +4,286 @@
 // Get a free hosted Postgres database in seconds: `npx create-db`
 
 generator client {
-  provider = "prisma-client"
-  output   = "../generated/prisma"
+  provider = "prisma-client-js"
 }
 
 datasource db {
   provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  ADMIN
+  ORGANIZER
+  JUDGE
+  PARTICIPANT
+}
+
+enum HackathonStatus {
+  DRAFT
+  PUBLISHED
+  REGISTRATION_OPEN
+  SUBMISSION_OPEN
+  JUDGING
+  COMPLETED
+  ARCHIVED
+}
+
+enum TeamMemberRole {
+  LEADER
+  MEMBER
+}
+
+enum ProjectStatus {
+  DRAFT
+  SUBMITTED
+  DISQUALIFIED
+}
+
+enum InviteStatus {
+  PENDING
+  ACCEPTED
+  DECLINED
+  EXPIRED
+}
+
+// CORE MODELS
+
+
+model User {
+  id            String   @id @default(uuid())
+  email         String   @unique
+  password      String
+  name          String
+  avatarUrl     String?
+  bio           String?
+  skills        String[] @default([])
+  role          Role     @default(PARTICIPANT)
+  isActive      Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  organizedHackathons Hackathon[]      @relation("HackathonOrganizer")
+  teamMemberships     TeamMember[]
+  judgeAssignments    JudgeAssignment[]
+  scoresGiven         Score[]
+  announcements       Announcement[]
+  invitesSent         TeamInvite[]     @relation("InviteSender")
+  invitesReceived     TeamInvite[]     @relation("InviteReceiver")
+
+  @@map("users")
+}
+
+model Hackathon {
+  id                    String          @id @default(uuid())
+  name                  String
+  slug                  String          @unique
+  description           String
+  theme                 String?
+  bannerUrl             String?
+  status                HackathonStatus @default(DRAFT)
+  maxTeamSize           Int             @default(4)
+  minTeamSize           Int             @default(1)
+  registrationOpensAt   DateTime
+  registrationClosesAt  DateTime
+  submissionOpensAt     DateTime
+  submissionClosesAt    DateTime
+  judgingStartsAt       DateTime
+  judgingEndsAt         DateTime
+  createdAt             DateTime        @default(now())
+  updatedAt             DateTime        @updatedAt
+
+  organizerId String
+  organizer   User   @relation("HackathonOrganizer", fields: [organizerId], references: [id])
+
+  tracks            Track[]
+  prizes            Prize[]
+  teams             Team[]
+  projects          Project[]
+  judgingCriteria   JudgingCriteria[]
+  judgeAssignments  JudgeAssignment[]
+  announcements     Announcement[]
+
+  @@index([status])
+  @@map("hackathons")
+}
+
+model Track {
+  id          String @id @default(uuid())
+  name        String
+  description String?
+
+  hackathonId String
+  hackathon   Hackathon @relation(fields: [hackathonId], references: [id], onDelete: Cascade)
+
+  prizes   Prize[]
+  teams    Team[]
+  projects Project[]
+
+  @@map("tracks")
+}
+
+model Prize {
+  id          String  @id @default(uuid())
+  title       String
+  description String?
+  value       String?
+  rank        Int     @default(1)
+
+  hackathonId String
+  hackathon   Hackathon @relation(fields: [hackathonId], references: [id], onDelete: Cascade)
+
+  trackId String?
+  track   Track?  @relation(fields: [trackId], references: [id], onDelete: SetNull)
+
+  @@map("prizes")
+}
+
+model Team {
+  id         String   @id @default(uuid())
+  name       String
+  inviteCode String   @unique
+  createdAt  DateTime @default(now())
+
+  hackathonId String
+  hackathon   Hackathon @relation(fields: [hackathonId], references: [id], onDelete: Cascade)
+
+  trackId String?
+  track   Track?  @relation(fields: [trackId], references: [id], onDelete: SetNull)
+
+  members TeamMember[]
+  invites TeamInvite[]
+  project Project?
+
+  @@unique([hackathonId, name])
+  @@map("teams")
+}
+
+model TeamMember {
+  id       String         @id @default(uuid())
+  role     TeamMemberRole @default(MEMBER)
+  joinedAt DateTime       @default(now())
+
+  teamId String
+  team   Team   @relation(fields: [teamId], references: [id], onDelete: Cascade)
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([teamId, userId])
+  @@map("team_members")
+}
+
+model TeamInvite {
+  id          String       @id @default(uuid())
+  status      InviteStatus @default(PENDING)
+  createdAt   DateTime     @default(now())
+  respondedAt DateTime?
+
+  teamId String
+  team   Team   @relation(fields: [teamId], references: [id], onDelete: Cascade)
+
+  senderId String
+  sender   User   @relation("InviteSender", fields: [senderId], references: [id])
+
+  receiverId String
+  receiver   User   @relation("InviteReceiver", fields: [receiverId], references: [id])
+
+  @@unique([teamId, receiverId])
+  @@map("team_invites")
+}
+
+model Project {
+  id          String        @id @default(uuid())
+  title       String
+  description String
+  repoUrl     String?
+  demoUrl     String?
+  videoUrl    String?
+  techStack   String[]      @default([])
+  status      ProjectStatus @default(DRAFT)
+  submittedAt DateTime?
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  hackathonId String
+  hackathon   Hackathon @relation(fields: [hackathonId], references: [id], onDelete: Cascade)
+
+  trackId String?
+  track   Track?  @relation(fields: [trackId], references: [id], onDelete: SetNull)
+
+  teamId String @unique
+  team   Team   @relation(fields: [teamId], references: [id], onDelete: Cascade)
+
+  judgeAssignments JudgeAssignment[]
+  scores           Score[]
+
+  @@map("projects")
+}
+
+model JudgingCriteria {
+  id          String @id @default(uuid())
+  name        String
+  description String?
+  maxScore    Int    @default(10)
+  weight      Float  @default(1.0)
+
+  hackathonId String
+  hackathon   Hackathon @relation(fields: [hackathonId], references: [id], onDelete: Cascade)
+
+  scores Score[]
+
+  @@map("judging_criteria")
+}
+
+model JudgeAssignment {
+  id         String   @id @default(uuid())
+  assignedAt DateTime @default(now())
+
+  hackathonId String
+  hackathon   Hackathon @relation(fields: [hackathonId], references: [id], onDelete: Cascade)
+
+  judgeId String
+  judge   User   @relation(fields: [judgeId], references: [id], onDelete: Cascade)
+
+  projectId String
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@unique([judgeId, projectId])
+  @@map("judge_assignments")
+}
+
+model Score {
+  id        String   @id @default(uuid())
+  value     Float
+  feedback  String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  projectId String
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  judgeId String
+  judge   User   @relation(fields: [judgeId], references: [id], onDelete: Cascade)
+
+  criteriaId String
+  criteria   JudgingCriteria @relation(fields: [criteriaId], references: [id], onDelete: Cascade)
+
+  @@unique([projectId, judgeId, criteriaId])
+  @@map("scores")
+}
+
+model Announcement {
+  id        String   @id @default(uuid())
+  title     String
+  content   String
+  createdAt DateTime @default(now())
+
+  hackathonId String
+  hackathon   Hackathon @relation(fields: [hackathonId], references: [id], onDelete: Cascade)
+
+  authorId String
+  author   User   @relation(fields: [authorId], references: [id])
+
+  @@map("announcements")
 }
